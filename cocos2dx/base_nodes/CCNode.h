@@ -151,6 +151,11 @@ public:
      * @return A initialized node which is marked as "autorelease".
      */
     static CCNode * create(void);
+
+    /**
+     * Gets count of nodes those are attached to scene graph.
+     */
+    static int getAttachedNodeCount() { return s_attachedNodeCount; }
     
     /**
      * Gets the description string. It makes debugging easier.
@@ -1406,6 +1411,7 @@ protected:
     
     CCComponentContainer *m_pComponentContainer;        ///< Dictionary of components
 
+    static int s_attachedNodeCount;
 };
 
 //#pragma mark - CCNodeRGBA
