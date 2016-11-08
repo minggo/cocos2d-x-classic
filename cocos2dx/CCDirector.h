@@ -309,6 +309,16 @@ public:
     void setContentScaleFactor(float scaleFactor);
     float getContentScaleFactor(void);
 
+    /**
+     *  Gets Frame Rate.
+     * @js NA
+     */
+    float getFrameRate() const { return m_fFrameRate; }
+
+    typedef void (*HookFunc)();
+    void setBeforeSetNextSceneHook(HookFunc func) { m_hookBeforeSetNextScene = func; }
+    void setAfterDrawHook(HookFunc func) { m_hookAfterDraw = func; }
+
 public:
     /** CCScheduler associated with this director
      @since v2.0
@@ -349,6 +359,7 @@ protected:
     
     void setNextScene(void);
     
+    void updateFrameRate();
     void showStats();
     void createStatsLabel();
     void calculateMPF();
@@ -418,6 +429,9 @@ protected:
 
     /* Projection protocol delegate */
     CCDirectorDelegate *m_pProjectionDelegate;
+
+    HookFunc m_hookBeforeSetNextScene;
+    HookFunc m_hookAfterDraw;
     
     // CCEGLViewProtocol will recreate stats labels to fit visible rect
     friend class CCEGLViewProtocol;

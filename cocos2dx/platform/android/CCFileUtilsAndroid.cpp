@@ -111,6 +111,11 @@ bool CCFileUtilsAndroid::isAbsolutePath(const std::string& strPath)
 
 unsigned char* CCFileUtilsAndroid::getFileData(const char* pszFileName, const char* pszMode, unsigned long * pSize)
 {    
+    if (m_beforeReadFileHook != NULL)
+    {
+        m_beforeReadFileHook();
+    }
+
     unsigned char * pData = 0;
 
     if ((! pszFileName) || (! pszMode) || 0 == strlen(pszFileName))

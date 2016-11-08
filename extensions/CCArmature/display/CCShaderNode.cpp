@@ -129,7 +129,7 @@ void CCShaderNode::draw()
 
     glDrawArrays(GL_TRIANGLES, 0, 6);
 
-    CC_INCREMENT_GL_DRAWS(1);
+    CC_INCREMENT_GL_DRAWN_BATCHES_AND_VERTICES(1, 6);
 }
 
 

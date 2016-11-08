@@ -464,6 +464,7 @@ void CCFileUtils::purgeFileUtils()
 
 CCFileUtils::CCFileUtils()
 : m_pFilenameLookupDict(NULL)
+, m_beforeReadFileHook(NULL)
 {
 }
 
