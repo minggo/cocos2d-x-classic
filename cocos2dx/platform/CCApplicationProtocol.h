@@ -1,6 +1,8 @@
 #ifndef __CC_APPLICATION_PROTOCOL_H__
 #define __CC_APPLICATION_PROTOCOL_H__
 
+#include "ccTypes.h"
+
 NS_CC_BEGIN
 
 enum TargetPlatform
@@ -52,6 +54,11 @@ public:
     @interval       The time, expressed in seconds, between current frame and next. 
     */
     virtual void setAnimationInterval(double interval) = 0;
+
+    virtual void setAnimationIntervalForReason(double interval, SetIntervalReason reason)
+    {
+        setAnimationInterval(interval);
+    }
 
     /**
     @brief Get current language config
