@@ -802,7 +802,7 @@ void CCDirector::pause(void)
     m_dOldAnimationInterval = m_dAnimationInterval;
 
     // when paused, don't consume CPU
-    setAnimationInterval(1 / 4.0);
+    setAnimationInterval(1 / 4.0, SET_INTERVAL_REASON_BY_DIRECTOR_PAUSE);
     m_bPaused = true;
 }
 
@@ -813,7 +813,7 @@ void CCDirector::resume(void)
         return;
     }
 
-    setAnimationInterval(m_dOldAnimationInterval);
+    setAnimationInterval(m_dOldAnimationInterval, SET_INTERVAL_REASON_BY_ENGINE);
 
     if (CCTime::gettimeofdayCocos2d(m_pLastUpdate, NULL) != 0)
     {
@@ -1066,6 +1066,11 @@ CCAccelerometer* CCDirector::getAccelerometer()
 // so we now only support DisplayLinkDirector
 void CCDisplayLinkDirector::startAnimation(void)
 {
+    startAnimation(SET_INTERVAL_REASON_BY_ENGINE);
+}
+
+void CCDisplayLinkDirector::startAnimation(SetIntervalReason reason)
+{
     if (CCTime::gettimeofdayCocos2d(m_pLastUpdate, NULL) != 0)
     {
         CCLOG("cocos2d: DisplayLinkDirector: Error on gettimeofday");
@@ -1073,7 +1078,7 @@ void CCDisplayLinkDirector::startAnimation(void)
 
     m_bInvalid = false;
 #ifndef EMSCRIPTEN
-    CCApplication::sharedApplication()->setAnimationInterval(m_dAnimationInterval);
+    CCApplication::sharedApplication()->setAnimationIntervalForReason(m_dAnimationInterval, reason);
 #endif // EMSCRIPTEN
 }
 
@@ -1100,11 +1105,16 @@ void CCDisplayLinkDirector::stopAnimation(void)
 
 void CCDisplayLinkDirector::setAnimationInterval(double dValue)
 {
+    setAnimationInterval(dValue, SET_INTERVAL_REASON_BY_GAME);
+}
+
+void CCDisplayLinkDirector::setAnimationInterval(double dValue, SetIntervalReason reason)
+{
     m_dAnimationInterval = dValue;
     if (! m_bInvalid)
     {
         stopAnimation();
-        startAnimation();
+        startAnimation(reason);
     }    
 }
 
