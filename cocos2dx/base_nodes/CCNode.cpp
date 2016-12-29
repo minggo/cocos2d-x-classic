@@ -903,7 +903,10 @@ void CCNode::transform()
 
 void CCNode::onEnter()
 {
-    ++s_attachedNodeCount;
+    if (!m_bRunning)
+    {
+        ++s_attachedNodeCount;
+    }
     arrayMakeObjectsPerformSelector(m_pChildren, onEnter, CCNode*);
 
     this->resumeSchedulerAndActions();
@@ -938,6 +941,10 @@ void CCNode::onExitTransitionDidStart()
 
 void CCNode::onExit()
 {
+    if (m_bRunning)
+    {
+        --s_attachedNodeCount;
+    }
     this->pauseSchedulerAndActions();
 
     m_bRunning = false;
@@ -947,8 +954,7 @@ void CCNode::onExit()
         CCScriptEngineManager::sharedManager()->getScriptEngine()->executeNodeEvent(this, kCCNodeOnExit);
     }
 
-    arrayMakeObjectsPerformSelector(m_pChildren, onExit, CCNode*);    
-    --s_attachedNodeCount;
+    arrayMakeObjectsPerformSelector(m_pChildren, onExit, CCNode*);
 }
 
 void CCNode::registerScriptHandler(int nHandler)
