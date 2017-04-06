@@ -56,6 +56,7 @@ extern unsigned int g_uNumberOfVertex;
 
 namespace {
 
+const char* ENGINE_DATA_MANAGER_VERSION = "1";
 const char* CLASS_NAME_ENGINE_DATA_MANAGER = "org/cocos2dx/lib/Cocos2dxEngineDataManager";
 const char* CLASS_NAME_RENDERER = "org/cocos2dx/lib/Cocos2dxRenderer";
 
@@ -1006,7 +1007,7 @@ void EngineDataManager::init()
 
     resetLastTime();
 
-
+    LOGD("EngineDataManager version: %s", ENGINE_DATA_MANAGER_VERSION);
     CCDirector* director = CCDirector::sharedDirector();
     director->setBeforeSetNextSceneHook(onBeforeSetNextScene);
     director->setAfterDrawHook(onAfterDrawScene);
