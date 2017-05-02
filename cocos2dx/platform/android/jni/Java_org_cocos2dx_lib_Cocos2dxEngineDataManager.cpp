@@ -118,7 +118,6 @@ uint32_t _continuousLowRealFpsCount = 0; // Only used in continuous mode
 uint32_t _continuousLowRealFpsThreshold = 1; // Only used in continuous mode 
 uint32_t _calculateAvgFpsCount = 0; // Only used in average mode
 float _calculateAvgFpsSum = 0.0f; // Only used in average mode
-float _calculateAvgFpsInterval = 0.2f; // Unit: seconds, only used in average mode
 struct timespec _lastTimeCalculateAvgFps = {0, 0}; // Only used in average mode
 
 const float DEFAULT_INTERVAL = (1.0f / 60.0f);
@@ -527,12 +526,6 @@ void parseDebugConfig()
     }
     LOGD("continuous_low_realfps_threshold: %u", _continuousLowRealFpsThreshold);
 
-    if (document.HasMember("calulate_avg_fps_interval"))
-    {
-        _calculateAvgFpsInterval = (float)document["calulate_avg_fps_interval"].GetDouble();
-    }
-    LOGD("calulate_avg_fps_interval: %f", _calculateAvgFpsInterval);
-
     if (document.HasMember("enable_collect_fps"))
     {
         _isCollectFpsEnabled = (float)document["enable_collect_fps"].GetBool();
@@ -902,7 +895,7 @@ void EngineDataManager::notifyGameStatusIfCpuOrGpuLevelChanged()
             clock_gettime(CLOCK_MONOTONIC, &now);
             float interval = getInterval(now, _lastTimeCalculateAvgFps);
 
-            if (interval > _calculateAvgFpsInterval)
+            if (interval > _notifyLevelByLowFpsThreshold)
             {
                 float avgFps = _calculateAvgFpsSum / _calculateAvgFpsCount;
                 // Low Real Fps definition:
