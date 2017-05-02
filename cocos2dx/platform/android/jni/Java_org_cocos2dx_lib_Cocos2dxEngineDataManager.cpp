@@ -56,7 +56,7 @@ extern unsigned int g_uNumberOfVertex;
 
 namespace {
 
-const char* ENGINE_DATA_MANAGER_VERSION = "1";
+const char* ENGINE_DATA_MANAGER_VERSION = "2";
 const char* CLASS_NAME_ENGINE_DATA_MANAGER = "org/cocos2dx/lib/Cocos2dxEngineDataManager";
 const char* CLASS_NAME_RENDERER = "org/cocos2dx/lib/Cocos2dxRenderer";
 
@@ -78,6 +78,7 @@ uint32_t _printCpuUsageCounter = 0;
 uint32_t _printCpuUsageThreshold = UINT_MAX;
 
 ProcessCpuTracker _cpuTracker;
+bool _forceEnableOptimization = false;
 #endif
 
 /* last time frame lost cycle was calculated */ 
@@ -469,6 +470,12 @@ void parseDebugConfig()
     RapidJsonDocument document;
     document.Parse<0>((char*)resLevelConfig, size);
     delete[] resLevelConfig;
+
+    if (document.HasMember("force_enable_optimization"))
+    {
+        _forceEnableOptimization = document["force_enable_optimization"].GetBool();
+    }
+    LOGD("force_enable_optimization: %d", _forceEnableOptimization);
     
     if (document.HasMember("level_log_freq"))
     {
@@ -999,6 +1006,14 @@ void EngineDataManager::onEnterBackground()
 // static
 void EngineDataManager::init()
 {
+    parseDebugConfig();
+
+    if (_forceEnableOptimization)
+    {
+        LOGD("init, force enable optimization!");
+        _isSupported = true;
+    }
+
     if (!_isSupported)
         return;
 
@@ -1014,8 +1029,6 @@ void EngineDataManager::init()
     CCFileUtils::sharedFileUtils()->setBeforeReadFileHook(onBeforeReadFile);
 
     notifyGameStatus(LAUNCH_BEGIN, 5, -1);
-
-    parseDebugConfig();
 
 #if EDM_DEBUG
     _cpuTracker.update();
