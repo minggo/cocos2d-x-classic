@@ -112,8 +112,8 @@ float _gpuFpsFactor = 1.0f;
 bool _isFpsChanged = false;
 float _oldRealFps = 60.0f;
 float _lowRealFpsThreshold = 0.25f;
-bool _isPrevFrameLowRealFps = false;
-
+uint32_t _continuousLowRealFpsCount = 0;
+uint32_t _continuousLowRealFpsThreshold = 1;
 
 const float DEFAULT_INTERVAL = (1.0f / 60.0f);
 // The final animation interval which is used in 'onDrawFrame'
@@ -187,7 +187,7 @@ CpuLevelInfo _cpuLevelCArray[] = {
     CpuLevelInfo(1250, 1500, 2000,  20),
     CpuLevelInfo(1750, 2000, 3000,  32),
     CpuLevelInfo(2750, 2500, 7000,  50),
-    CpuLevelInfo(4000, 3500, 10000, 80)
+    // CpuLevelInfo(4000, 3500, 10000, 80)
 };
 
 std::vector<CpuLevelInfo> _cpuLevelArr(_cpuLevelCArray, _cpuLevelCArray + sizeof(_cpuLevelCArray) / sizeof(_cpuLevelCArray[0]));
@@ -506,6 +506,12 @@ void parseDebugConfig()
         _notifyLevelByLowFpsThreshold = (float)document["notify_level_by_low_fps_threshold"].GetDouble();
     }
     LOGD("notify_level_by_low_fps_threshold: %f", _notifyLevelByLowFpsThreshold);
+
+    if (document.HasMember("continuous_low_realfps_threshold"))
+    {
+        _continuousLowRealFpsThreshold = document["continuous_low_realfps_threshold"].GetUint();
+    }
+    LOGD("continuous_low_realfps_threshold: %u", _continuousLowRealFpsThreshold);
 
     if (document.HasMember("enable_collect_fps"))
     {
@@ -844,9 +850,10 @@ void EngineDataManager::notifyGameStatusIfCpuOrGpuLevelChanged()
             clock_gettime(CLOCK_MONOTONIC, &now);
             float lowFpsIntervalInSeconds = getInterval(now, _lastTimeNotifyLevelByLowFps);
       
-            if (_isPrevFrameLowRealFps && lowFpsIntervalInSeconds > _notifyLevelByLowFpsThreshold)
+            if (_continuousLowRealFpsCount >= _continuousLowRealFpsThreshold
+                && lowFpsIntervalInSeconds > _notifyLevelByLowFpsThreshold)
             {
-                _isPrevFrameLowRealFps = false;
+                _continuousLowRealFpsCount = 0;
                 LOGD("Detected low fps: real: %.01f, expected: %.01f, interval: %.03fs", realFps, expectedFps, lowFpsIntervalInSeconds);
                 _lastTimeNotifyLevelByLowFps = now;
             }
@@ -856,13 +863,12 @@ void EngineDataManager::notifyGameStatusIfCpuOrGpuLevelChanged()
                 // In this way, we could avoid to notify vendor frequently.
                 isLowRealFps = false;
 
-                // Mark previous frame as low fps
-                _isPrevFrameLowRealFps = true;
+                ++_continuousLowRealFpsCount;
             }
         }
         else
         {
-            _isPrevFrameLowRealFps = false;
+            _continuousLowRealFpsCount = 0;
         }
     }
 
