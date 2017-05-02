@@ -56,7 +56,7 @@ extern unsigned int g_uNumberOfVertex;
 
 namespace {
 
-const char* ENGINE_DATA_MANAGER_VERSION = "2";
+const char* ENGINE_DATA_MANAGER_VERSION = "3";
 const char* CLASS_NAME_ENGINE_DATA_MANAGER = "org/cocos2dx/lib/Cocos2dxEngineDataManager";
 const char* CLASS_NAME_RENDERER = "org/cocos2dx/lib/Cocos2dxRenderer";
 
@@ -87,8 +87,6 @@ struct timespec _lastFrameLost100msUpdate = {0, 0};
 
 /* last time low fps cycle was calculated */
 struct timespec _lastLowFpsUpdate = {0, 0};
-struct timespec _lastTimeNotifyLevelByLowFps = {0, 0};
-float _notifyLevelByLowFpsThreshold = 0.2f;
 
 int _continuousFrameLostCycle = 5000;
 int _continuousFrameLostThreshold = 3;
@@ -111,9 +109,17 @@ float _cpuFpsFactor = 1.0f;
 float _gpuFpsFactor = 1.0f;
 bool _isFpsChanged = false;
 float _oldRealFps = 60.0f;
-float _lowRealFpsThreshold = 0.25f;
-uint32_t _continuousLowRealFpsCount = 0;
-uint32_t _continuousLowRealFpsThreshold = 1;
+
+uint32_t _lowFpsCheckMode = 0; // 0: Continuous mode, 1: Average mode
+float _lowRealFpsThreshold = 0.25f; // Unit: percentage (0 ~ 1)
+struct timespec _lastTimeNotifyLevelByLowFps = {0, 0}; // Only used in continuous mode 
+float _notifyLevelByLowFpsThreshold = 0.2f; // Unit: seconds, only used in continuous mode 
+uint32_t _continuousLowRealFpsCount = 0; // Only used in continuous mode 
+uint32_t _continuousLowRealFpsThreshold = 1; // Only used in continuous mode 
+uint32_t _calculateAvgFpsCount = 0; // Only used in average mode
+float _calculateAvgFpsSum = 0.0f; // Only used in average mode
+float _calculateAvgFpsInterval = 0.2f; // Unit: seconds, only used in average mode
+struct timespec _lastTimeCalculateAvgFps = {0, 0}; // Only used in average mode
 
 const float DEFAULT_INTERVAL = (1.0f / 60.0f);
 // The final animation interval which is used in 'onDrawFrame'
@@ -446,6 +452,8 @@ void resetLastTime()
     _lastContinuousFrameLostUpdate = _lastFrameLost100msUpdate;
     _lastLowFpsUpdate = _lastFrameLost100msUpdate;
     _lastTimeNotifyLevelByLowFps = _lastFrameLost100msUpdate;
+    _lastTimeCalculateAvgFps = _lastFrameLost100msUpdate;
+
 #if EDM_DEBUG
     _fpsCollector.reset(_lastFrameLost100msUpdate);
 #endif
@@ -495,6 +503,12 @@ void parseDebugConfig()
     }
     LOGD("level_decrease_threshold: %f", _levelDecreaseThreshold);
 
+    if (document.HasMember("low_fps_check_mode"))
+    {
+        _lowFpsCheckMode = document["low_fps_check_mode"].GetUint();
+    }
+    LOGD("low_fps_check_mode: %u", _lowFpsCheckMode);
+
     if (document.HasMember("low_realfps_threshold"))
     {
         _lowRealFpsThreshold = (float)document["low_realfps_threshold"].GetDouble();
@@ -512,6 +526,12 @@ void parseDebugConfig()
         _continuousLowRealFpsThreshold = document["continuous_low_realfps_threshold"].GetUint();
     }
     LOGD("continuous_low_realfps_threshold: %u", _continuousLowRealFpsThreshold);
+
+    if (document.HasMember("calulate_avg_fps_interval"))
+    {
+        _calculateAvgFpsInterval = (float)document["calulate_avg_fps_interval"].GetDouble();
+    }
+    LOGD("calulate_avg_fps_interval: %f", _calculateAvgFpsInterval);
 
     if (document.HasMember("enable_collect_fps"))
     {
@@ -841,34 +861,66 @@ void EngineDataManager::notifyGameStatusIfCpuOrGpuLevelChanged()
             _fpsCollector.update(realFps);
         }
 #endif
-        // Low Real Fps definition:
-        // CurrentFrameTimeCost > ExpectedFrameTimeCost + ExpectedFrameTimeCost * LowRealFpsThreshold
-        isLowRealFps = (1.0f / realFps) > (_animationInterval + _animationInterval * _lowRealFpsThreshold);
-        if (isLowRealFps)
+        if (0 == _lowFpsCheckMode)
         {
-            struct timespec now = {0, 0};
-            clock_gettime(CLOCK_MONOTONIC, &now);
-            float lowFpsIntervalInSeconds = getInterval(now, _lastTimeNotifyLevelByLowFps);
-      
-            if (_continuousLowRealFpsCount >= _continuousLowRealFpsThreshold
-                && lowFpsIntervalInSeconds > _notifyLevelByLowFpsThreshold)
+            // Low Real Fps definition:
+            // CurrentFrameTimeCost > ExpectedFrameTimeCost + ExpectedFrameTimeCost * LowRealFpsThreshold
+            isLowRealFps = (1.0f / realFps) > (_animationInterval + _animationInterval * _lowRealFpsThreshold);
+            if (isLowRealFps)
             {
-                _continuousLowRealFpsCount = 0;
-                LOGD("Detected low fps: real: %.01f, expected: %.01f, interval: %.03fs", realFps, expectedFps, lowFpsIntervalInSeconds);
-                _lastTimeNotifyLevelByLowFps = now;
+                struct timespec now = {0, 0};
+                clock_gettime(CLOCK_MONOTONIC, &now);
+                float lowFpsIntervalInSeconds = getInterval(now, _lastTimeNotifyLevelByLowFps);
+          
+                if (_continuousLowRealFpsCount >= _continuousLowRealFpsThreshold
+                    && lowFpsIntervalInSeconds > _notifyLevelByLowFpsThreshold)
+                {
+                    _continuousLowRealFpsCount = 0;
+                    LOGD("Detected low fps (mode 0): real: %.01f, expected: %.01f, interval: %.03fs", realFps, expectedFps, lowFpsIntervalInSeconds);
+                    _lastTimeNotifyLevelByLowFps = now;
+                }
+                else
+                {
+                    // Reset this varible to false since it's smaller than notification threshold.
+                    // In this way, we could avoid to notify vendor frequently.
+                    isLowRealFps = false;
+
+                    ++_continuousLowRealFpsCount;
+                }
             }
             else
             {
-                // Reset this varible to false since it's smaller than notification threshold.
-                // In this way, we could avoid to notify vendor frequently.
-                isLowRealFps = false;
-
-                ++_continuousLowRealFpsCount;
+                _continuousLowRealFpsCount = 0;
             }
         }
         else
         {
-            _continuousLowRealFpsCount = 0;
+            ++_calculateAvgFpsCount;
+            _calculateAvgFpsSum += realFps;
+
+            struct timespec now = {0, 0};
+            clock_gettime(CLOCK_MONOTONIC, &now);
+            float interval = getInterval(now, _lastTimeCalculateAvgFps);
+
+            if (interval > _calculateAvgFpsInterval)
+            {
+                float avgFps = _calculateAvgFpsSum / _calculateAvgFpsCount;
+                // Low Real Fps definition:
+                // CurrentFrameTimeCost > ExpectedFrameTimeCost + ExpectedFrameTimeCost * LowRealFpsThreshold
+                isLowRealFps = (1.0f / avgFps) > (_animationInterval + _animationInterval * _lowRealFpsThreshold);
+
+                if (isLowRealFps)
+                {
+                    LOGD("Detected low fps (mode 1): avg: %.01f, expected: %.01f, interval: %.03fs, framecount: %u", avgFps, expectedFps, interval, _calculateAvgFpsCount);
+                }
+
+                // Reset counter
+                _calculateAvgFpsCount = 0;
+                _calculateAvgFpsSum = 0.0f;
+
+                // Reset last time of calculating average fps
+                _lastTimeCalculateAvgFps = now;
+            }
         }
     }
 
