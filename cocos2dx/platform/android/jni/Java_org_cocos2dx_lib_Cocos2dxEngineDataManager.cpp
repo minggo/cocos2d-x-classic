@@ -38,7 +38,7 @@ THE SOFTWARE.
 #define LOGD(...)  __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
 #define LOGE(...)  __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
-#define EDM_DEBUG 1
+#define EDM_DEBUG 0
 
 #if EDM_DEBUG
 #include "ProcessCpuTracker.h"
@@ -111,14 +111,13 @@ bool _isFpsChanged = false;
 float _oldRealFps = 60.0f;
 
 uint32_t _lowFpsCheckMode = 0; // 0: Continuous mode, 1: Average mode
-float _lowRealFpsThreshold = 0.25f; // Unit: percentage (0 ~ 1)
+float _lowRealFpsThreshold = 0.5f; // Unit: percentage (0 ~ 1)
 struct timespec _lastTimeNotifyLevelByLowFps = {0, 0}; // Only used in continuous mode 
-float _notifyLevelByLowFpsThreshold = 0.2f; // Unit: seconds, only used in continuous mode 
+float _notifyLevelByLowFpsThreshold = 0.5f; // Unit: seconds, only used in continuous mode 
 uint32_t _continuousLowRealFpsCount = 0; // Only used in continuous mode 
 uint32_t _continuousLowRealFpsThreshold = 1; // Only used in continuous mode 
 uint32_t _calculateAvgFpsCount = 0; // Only used in average mode
 float _calculateAvgFpsSum = 0.0f; // Only used in average mode
-float _calculateAvgFpsInterval = 0.2f; // Unit: seconds, only used in average mode
 struct timespec _lastTimeCalculateAvgFps = {0, 0}; // Only used in average mode
 
 const float DEFAULT_INTERVAL = (1.0f / 60.0f);
@@ -527,12 +526,6 @@ void parseDebugConfig()
     }
     LOGD("continuous_low_realfps_threshold: %u", _continuousLowRealFpsThreshold);
 
-    if (document.HasMember("calulate_avg_fps_interval"))
-    {
-        _calculateAvgFpsInterval = (float)document["calulate_avg_fps_interval"].GetDouble();
-    }
-    LOGD("calulate_avg_fps_interval: %f", _calculateAvgFpsInterval);
-
     if (document.HasMember("enable_collect_fps"))
     {
         _isCollectFpsEnabled = (float)document["enable_collect_fps"].GetBool();
@@ -902,7 +895,7 @@ void EngineDataManager::notifyGameStatusIfCpuOrGpuLevelChanged()
             clock_gettime(CLOCK_MONOTONIC, &now);
             float interval = getInterval(now, _lastTimeCalculateAvgFps);
 
-            if (interval > _calculateAvgFpsInterval)
+            if (interval > _notifyLevelByLowFpsThreshold)
             {
                 float avgFps = _calculateAvgFpsSum / _calculateAvgFpsCount;
                 // Low Real Fps definition:
