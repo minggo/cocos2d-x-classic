@@ -1059,11 +1059,13 @@ void EngineDataManager::init()
 {
     parseDebugConfig();
 
+#if EDM_DEBUG
     if (_forceEnableOptimization)
     {
         LOGD("init, force enable optimization!");
         _isSupported = true;
     }
+#endif
 
     if (!_isSupported)
         return;
