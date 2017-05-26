@@ -33,18 +33,83 @@ THE SOFTWARE.
 #include <cmath>
 #include <limits.h>
 #include <sstream>
+#include <algorithm>
 
 #define LOG_TAG    "EngineDataManager.cpp"
 #define LOGD(...)  __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
 #define LOGE(...)  __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
-#define EDM_DEBUG 0
+#define EDM_DEBUG 1
 
 #if EDM_DEBUG
 #include "ProcessCpuTracker.h"
-#include "json/document.h"
-typedef rapidjson::GenericDocument<rapidjson::UTF8<>, rapidjson::CrtAllocator> RapidJsonDocument;
-typedef rapidjson::GenericValue<rapidjson::UTF8<>, rapidjson::CrtAllocator> RapidJsonValue;
+
+namespace {
+
+std::string& trim(std::string &s)   
+{  
+    if (s.empty())   
+        return s;  
+
+    s.erase(0, s.find_first_not_of(" \t"));
+    s.erase(s.find_last_not_of(" \t") + 1);
+    return s;
+} 
+
+void split(const std::string& s, const std::string& delim, std::vector<std::string>* ret)  
+{  
+    size_t last = 0;
+    size_t index = s.find(delim, last);
+    while (index != std::string::npos)
+    {
+        ret->push_back(s.substr(last, index - last));
+        last = index + 1;
+        index = s.find(delim, last);
+    }
+    if (index - last > 0)
+    {
+        ret->push_back(s.substr(last, index - last));
+    }
+}
+
+std::string& deleteChar(std::string& s, const char* toDeleteChar)
+{
+    if (s.empty())
+        return s;
+
+    size_t pos = s.find_first_of(toDeleteChar);
+    while (pos != std::string::npos)
+    {
+        s.erase(pos, 1);
+        pos = s.find_first_of(toDeleteChar);
+    }
+
+    return s;
+}
+
+bool getValueFromMap(const std::map<std::string, std::string> m, const std::string& key, std::string* outValue)
+{
+    if (m.empty() || outValue == NULL)
+        return false;
+
+    std::map<std::string, std::string>::const_iterator iter = m.find(key);
+    if (iter != m.end())
+    {
+        *outValue = iter->second;
+        return true;
+    }
+    outValue->clear();
+    return false;
+}
+
+std::string& toLowercase(std::string& s)
+{
+    std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+    return s;
+}
+
+} // namespace {
+
 #endif
 
 #define JNI_FUNC_PREFIX(func) Java_org_cocos2dx_lib_Cocos2dxEngineDataManager_##func
@@ -471,135 +536,242 @@ void parseDebugConfig()
     }
 
     LOGD("Using debug level config: %s", configPath);
+
+    std::string buffer;
     unsigned long size = 0;
     unsigned char* resLevelConfig = fileUtils->getFileData(configPath, "rb", &size);
-
-    RapidJsonDocument document;
-    document.Parse<0>((char*)resLevelConfig, size);
+    if (resLevelConfig != NULL && size > 0)
+    {
+        buffer.insert(0, (const char*)resLevelConfig, (size_t)size);
+    }
     delete[] resLevelConfig;
 
-    if (document.HasMember("force_enable_optimization"))
+    // Get std::map from config file
+    size_t pos = buffer.find_first_of('{');
+    if (pos != std::string::npos)
     {
-        _forceEnableOptimization = document["force_enable_optimization"].GetBool();
+        buffer.replace(pos, 1, "");
+    }
+    pos = buffer.find_last_of('}');
+
+    if (pos != std::string::npos)
+    {
+        buffer.replace(pos, 1, "");
+    }
+
+    deleteChar(buffer, "\r");
+    deleteChar(buffer, "\n");
+    deleteChar(buffer, "\t");
+    deleteChar(buffer, " ");
+
+    std::string cpuLevelBuffer;
+    {
+        const char* cpuLevelStartKey = "\"cpu_level\":[";
+        const size_t cpuLevelStartKeyLen = strlen(cpuLevelStartKey);
+        size_t cpuLevelStartPos = buffer.find(cpuLevelStartKey);
+        if (cpuLevelStartPos != std::string::npos)
+        {
+            cpuLevelStartPos += cpuLevelStartKeyLen;
+            size_t cpuLevelEndPos = buffer.find("]", cpuLevelStartPos);
+            cpuLevelBuffer = buffer.substr(cpuLevelStartPos, cpuLevelEndPos - cpuLevelStartPos);
+            size_t extraLenToErase = 0;
+            if ((cpuLevelEndPos + 1) < (buffer.length()))
+            {
+                if (buffer[cpuLevelEndPos + 1] == ',')
+                    extraLenToErase = 1;
+            }
+            buffer.erase(cpuLevelStartPos-cpuLevelStartKeyLen, cpuLevelBuffer.length() + cpuLevelStartKeyLen + 1 + extraLenToErase);
+        }
+    }
+
+    LOGD("cpuLevelBuffer: %s", cpuLevelBuffer.c_str());
+
+    std::string gpuLevelBuffer;
+    {
+        const char* gpuLevelStartKey = "\"gpu_level\":[";
+        const size_t gpuLevelStartKeyLen = strlen(gpuLevelStartKey);
+        size_t gpuLevelStartPos = buffer.find(gpuLevelStartKey);
+        if (gpuLevelStartPos != std::string::npos)
+        {
+            gpuLevelStartPos += gpuLevelStartKeyLen;
+            size_t gpuLevelEndPos = buffer.find("]", gpuLevelStartPos);
+            gpuLevelBuffer = buffer.substr(gpuLevelStartPos, gpuLevelEndPos - gpuLevelStartPos);
+            size_t extraLenToErase = 0;
+            if ((gpuLevelEndPos + 1) < (buffer.length()))
+            {
+                if (buffer[gpuLevelEndPos + 1] == ',')
+                    extraLenToErase = 1;
+            }
+            buffer.erase(gpuLevelStartPos-gpuLevelStartKeyLen, gpuLevelBuffer.length() + gpuLevelStartKeyLen + 1 + extraLenToErase);
+        }
+    }
+
+    LOGD("gpuLevelBuffer: %s", gpuLevelBuffer.c_str());
+
+    std::vector<std::string> keyValueArr;
+    split(buffer, ",", &keyValueArr);
+
+    if (keyValueArr.empty())
+    {
+        LOGE("Parse cc-res-level.json failed!");
+        return;
+    }
+
+    std::map<std::string, std::string> configMap;
+    for (size_t i = 0, len = keyValueArr.size(); i < len; ++i)
+    {
+        std::string e = keyValueArr[i];
+        if (e.empty())
+            continue;
+
+        std::vector<std::string> keyValue;
+        split(e, ":", &keyValue);
+        if (keyValue.empty() || keyValue.size() != 2)
+        {
+            LOGE("Parse (%s) failed, size: %d", e.c_str(), (int)keyValue.size());
+            return;
+        }
+
+        deleteChar(keyValue[0], "\"");
+        configMap.insert(std::make_pair(keyValue[0], keyValue[1]));
+    }
+    if (configMap.empty())
+    {
+        LOGD("config map is empty!");
+        return;
+    }
+
+    std::string tmp;
+    if (getValueFromMap(configMap, "force_enable_optimization", &tmp))
+    {
+        toLowercase(tmp);
+        if (tmp == "true")
+        {
+            _forceEnableOptimization = true;
+        }
     }
     LOGD("force_enable_optimization: %d", _forceEnableOptimization);
     
-    if (document.HasMember("level_log_freq"))
+    if (getValueFromMap(configMap, "level_log_freq", &tmp))
     {
-        _printCpuGpuLevelThreshold = document["level_log_freq"].GetUint();
+        _printCpuGpuLevelThreshold = (uint32_t)atoi(tmp.c_str());
     }
     LOGD("level_log_freq: %u", _printCpuGpuLevelThreshold);
 
-    if (document.HasMember("cpu_usage_log_freq"))
+    if (getValueFromMap(configMap, "cpu_usage_log_freq", &tmp))
     {
-        _printCpuUsageThreshold = document["cpu_usage_log_freq"].GetUint();
+        _printCpuUsageThreshold = (uint32_t)atoi(tmp.c_str());
     }
     LOGD("cpu_usage_log_freq: %u", _printCpuUsageThreshold);
 
-    if (document.HasMember("level_decrease_threshold"))
+    if (getValueFromMap(configMap, "level_decrease_threshold", &tmp))
     {
-        _levelDecreaseThreshold = (float)document["level_decrease_threshold"].GetDouble();
+        _levelDecreaseThreshold = atof(tmp.c_str());
     }
     LOGD("level_decrease_threshold: %f", _levelDecreaseThreshold);
 
-    if (document.HasMember("low_fps_check_mode"))
+    if (getValueFromMap(configMap, "low_fps_check_mode", &tmp))
     {
-        _lowFpsCheckMode = document["low_fps_check_mode"].GetUint();
+        _lowFpsCheckMode = (uint32_t)atoi(tmp.c_str());
     }
     LOGD("low_fps_check_mode: %u", _lowFpsCheckMode);
 
-    if (document.HasMember("low_realfps_threshold"))
+    if (getValueFromMap(configMap, "low_realfps_threshold", &tmp))
     {
-        _lowRealFpsThreshold = (float)document["low_realfps_threshold"].GetDouble();
+        _lowRealFpsThreshold = atof(tmp.c_str());
     }
     LOGD("low_realfps_threshold: %f", _lowRealFpsThreshold);
 
-    if (document.HasMember("notify_level_by_low_fps_threshold"))
+    if (getValueFromMap(configMap, "notify_level_by_low_fps_threshold", &tmp))
     {
-        _notifyLevelByLowFpsThreshold = (float)document["notify_level_by_low_fps_threshold"].GetDouble();
+        _notifyLevelByLowFpsThreshold = atof(tmp.c_str());
     }
     LOGD("notify_level_by_low_fps_threshold: %f", _notifyLevelByLowFpsThreshold);
 
-    if (document.HasMember("continuous_low_realfps_threshold"))
+    if (getValueFromMap(configMap, "continuous_low_realfps_threshold", &tmp))
     {
-        _continuousLowRealFpsThreshold = document["continuous_low_realfps_threshold"].GetUint();
+        _continuousLowRealFpsThreshold = (uint32_t)atoi(tmp.c_str());
     }
     LOGD("continuous_low_realfps_threshold: %u", _continuousLowRealFpsThreshold);
 
-    if (document.HasMember("enable_collect_fps"))
+    if (getValueFromMap(configMap, "enable_collect_fps", &tmp))
     {
-        _isCollectFpsEnabled = (float)document["enable_collect_fps"].GetBool();
+        toLowercase(tmp);
+        if (tmp == "true")
+        {
+            _isCollectFpsEnabled = true;
+        }
     }
     LOGD("enable_collect_fps: %d", (int)_isCollectFpsEnabled);
 
-    if (document.HasMember("collect_fps_interval"))
+    if (getValueFromMap(configMap, "collect_fps_interval", &tmp))
     {
-        float collectFpsInterval = (float)document["collect_fps_interval"].GetDouble();
+        float collectFpsInterval = atof(tmp.c_str());
         _fpsCollector.setCollectFpsInterval(collectFpsInterval);
     }
     LOGD("collect_fps_interval: %f", _fpsCollector.getCollectFpsInterval());
 
-    if (document.HasMember("cpu_level"))
-    {
-        const RapidJsonValue& cpu = document["cpu_level"];
-        assert(cpu.IsArray());
-        assert(_cpuLevelArr.size() == cpu.Size());
+    // if (getValueFromMap(configMap, "cpu_level", &tmp))
+    // {
+    //     const RapidJsonValue& cpu = document["cpu_level"];
+    //     assert(cpu.IsArray());
+    //     assert(_cpuLevelArr.size() == cpu.Size());
 
-        _cpuLevelArr.clear();
-        CpuLevelInfo cpuLevelInfo;
-        for (unsigned int i = 0; i < cpu.Size(); ++i)
-        {
-            assert(cpu[i].IsObject());
+    //     _cpuLevelArr.clear();
+    //     CpuLevelInfo cpuLevelInfo;
+    //     for (unsigned int i = 0; i < cpu.Size(); ++i)
+    //     {
+    //         assert(cpu[i].IsObject());
 
-            cpuLevelInfo.nodeCount = cpu[i]["node"].GetUint();
-            cpuLevelInfo.particleCount = cpu[i]["particle"].GetUint();
-            cpuLevelInfo.actionCount = cpu[i]["action"].GetUint();
-            cpuLevelInfo.audioCount = cpu[i]["audio"].GetUint();
+    //         cpuLevelInfo.nodeCount = cpu[i]["node"].GetUint();
+    //         cpuLevelInfo.particleCount = cpu[i]["particle"].GetUint();
+    //         cpuLevelInfo.actionCount = cpu[i]["action"].GetUint();
+    //         cpuLevelInfo.audioCount = cpu[i]["audio"].GetUint();
             
-            _cpuLevelArr.push_back(cpuLevelInfo);
-        }
-    }
+    //         _cpuLevelArr.push_back(cpuLevelInfo);
+    //     }
+    // }
 
-    if (document.HasMember("gpu_level"))
-    {
-        const RapidJsonValue& gpu = document["gpu_level"];
-        assert(gpu.IsArray());
-        assert(_gpuLevelArr.size() == gpu.Size());
+    // if (getValueFromMap(configMap, "gpu_level", &tmp))
+    // {
+    //     const RapidJsonValue& gpu = document["gpu_level"];
+    //     assert(gpu.IsArray());
+    //     assert(_gpuLevelArr.size() == gpu.Size());
         
-        _gpuLevelArr.clear();
-        GpuLevelInfo gpuLevelInfo;
-        for (unsigned int i = 0; i < gpu.Size(); ++i)
-        {
-            assert(gpu[i].IsObject());
+    //     _gpuLevelArr.clear();
+    //     GpuLevelInfo gpuLevelInfo;
+    //     for (unsigned int i = 0; i < gpu.Size(); ++i)
+    //     {
+    //         assert(gpu[i].IsObject());
             
-            gpuLevelInfo.vertexCount = gpu[i]["vertex"].GetUint();
-            gpuLevelInfo.drawCount = gpu[i]["draw"].GetUint();
+    //         gpuLevelInfo.vertexCount = gpu[i]["vertex"].GetUint();
+    //         gpuLevelInfo.drawCount = gpu[i]["draw"].GetUint();
             
-            _gpuLevelArr.push_back(gpuLevelInfo);
-        }
-    }
+    //         _gpuLevelArr.push_back(gpuLevelInfo);
+    //     }
+    // }
 
-    {
-        LOGD("-----------------------------------------");
-        std::vector<CpuLevelInfo>::iterator iter = _cpuLevelArr.begin();
-        for (; iter != _cpuLevelArr.end(); ++iter)
-        {
-            CpuLevelInfo level = *iter;
-            LOGD("cpu level: %u, %u, %u, %u", level.nodeCount, level.particleCount, level.actionCount, level.audioCount);
-        }
-        LOGD("-----------------------------------------");
-    }
+    // {
+    //     LOGD("-----------------------------------------");
+    //     std::vector<CpuLevelInfo>::iterator iter = _cpuLevelArr.begin();
+    //     for (; iter != _cpuLevelArr.end(); ++iter)
+    //     {
+    //         CpuLevelInfo level = *iter;
+    //         LOGD("cpu level: %u, %u, %u, %u", level.nodeCount, level.particleCount, level.actionCount, level.audioCount);
+    //     }
+    //     LOGD("-----------------------------------------");
+    // }
 
-    {
-        LOGD("=========================================");
-        std::vector<GpuLevelInfo>::iterator iter = _gpuLevelArr.begin();
-        for (; iter != _gpuLevelArr.end(); ++iter)
-        {
-            GpuLevelInfo level = *iter;
-            LOGD("gpu level: %u, %u", level.vertexCount, level.drawCount);
-        }
-        LOGD("=========================================");
-    }
+    // {
+    //     LOGD("=========================================");
+    //     std::vector<GpuLevelInfo>::iterator iter = _gpuLevelArr.begin();
+    //     for (; iter != _gpuLevelArr.end(); ++iter)
+    //     {
+    //         GpuLevelInfo level = *iter;
+    //         LOGD("gpu level: %u, %u", level.vertexCount, level.drawCount);
+    //     }
+    //     LOGD("=========================================");
+    // }
 #endif // EDM_DEBUG
 }
 
