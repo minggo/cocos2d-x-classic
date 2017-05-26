@@ -46,24 +46,24 @@ THE SOFTWARE.
 
 namespace {
 
-std::string& trim(std::string &s)   
-{  
-    if (s.empty())   
-        return s;  
+std::string& trim(std::string& s)
+{
+    if (s.empty())
+        return s;
 
     s.erase(0, s.find_first_not_of(" \t"));
     s.erase(s.find_last_not_of(" \t") + 1);
     return s;
-} 
+}
 
-void split(const std::string& s, const std::string& delim, std::vector<std::string>* ret)  
-{  
+void split(const std::string& s, const std::string& delim, std::vector<std::string>* ret)
+{
     size_t last = 0;
     size_t index = s.find(delim, last);
     while (index != std::string::npos)
     {
         ret->push_back(s.substr(last, index - last));
-        last = index + 1;
+        last = index + delim.length();
         index = s.find(delim, last);
     }
     if (index - last > 0)
@@ -87,7 +87,7 @@ std::string& deleteChar(std::string& s, const char* toDeleteChar)
     return s;
 }
 
-bool getValueFromMap(const std::map<std::string, std::string> m, const std::string& key, std::string* outValue)
+bool getValueFromMap(const std::map<std::string, std::string>& m, const std::string& key, std::string* outValue)
 {
     if (m.empty() || outValue == NULL)
         return false;
@@ -121,7 +121,7 @@ extern unsigned int g_uNumberOfVertex;
 
 namespace {
 
-const char* ENGINE_DATA_MANAGER_VERSION = "3";
+const char* ENGINE_DATA_MANAGER_VERSION = "4";
 const char* CLASS_NAME_ENGINE_DATA_MANAGER = "org/cocos2dx/lib/Cocos2dxEngineDataManager";
 const char* CLASS_NAME_RENDERER = "org/cocos2dx/lib/Cocos2dxRenderer";
 
@@ -179,6 +179,8 @@ uint32_t _lowFpsCheckMode = 0; // 0: Continuous mode, 1: Average mode
 float _lowRealFpsThreshold = 0.5f; // Unit: percentage (0 ~ 1)
 struct timespec _lastTimeNotifyLevelByLowFps = {0, 0}; // Only used in continuous mode 
 float _notifyLevelByLowFpsThreshold = 0.5f; // Unit: seconds, only used in continuous mode 
+int _minValueOfNotifyCpuLevelByLowFps = 3;
+int _minValueOfNotifyGpuLevelByLowFps = 5;
 uint32_t _continuousLowRealFpsCount = 0; // Only used in continuous mode 
 uint32_t _continuousLowRealFpsThreshold = 1; // Only used in continuous mode 
 uint32_t _calculateAvgFpsCount = 0; // Only used in average mode
@@ -547,16 +549,18 @@ void parseDebugConfig()
     delete[] resLevelConfig;
 
     // Get std::map from config file
-    size_t pos = buffer.find_first_of('{');
-    if (pos != std::string::npos)
     {
-        buffer.replace(pos, 1, "");
-    }
-    pos = buffer.find_last_of('}');
+        size_t pos = buffer.find_first_of('{');
+        if (pos != std::string::npos)
+        {
+            buffer.replace(pos, 1, "");
+        }
+        pos = buffer.find_last_of('}');
 
-    if (pos != std::string::npos)
-    {
-        buffer.replace(pos, 1, "");
+        if (pos != std::string::npos)
+        {
+            buffer.replace(pos, 1, "");
+        }
     }
 
     deleteChar(buffer, "\r");
@@ -574,17 +578,14 @@ void parseDebugConfig()
             cpuLevelStartPos += cpuLevelStartKeyLen;
             size_t cpuLevelEndPos = buffer.find("]", cpuLevelStartPos);
             cpuLevelBuffer = buffer.substr(cpuLevelStartPos, cpuLevelEndPos - cpuLevelStartPos);
-            size_t extraLenToErase = 0;
-            if ((cpuLevelEndPos + 1) < (buffer.length()))
-            {
-                if (buffer[cpuLevelEndPos + 1] == ',')
-                    extraLenToErase = 1;
-            }
-            buffer.erase(cpuLevelStartPos-cpuLevelStartKeyLen, cpuLevelBuffer.length() + cpuLevelStartKeyLen + 1 + extraLenToErase);
+            buffer.erase(cpuLevelStartPos-cpuLevelStartKeyLen, cpuLevelBuffer.length() + cpuLevelStartKeyLen + 1);
         }
     }
 
-    LOGD("cpuLevelBuffer: %s", cpuLevelBuffer.c_str());
+    if (!cpuLevelBuffer.empty())
+    {
+        LOGD("cpuLevelBuffer: %s", cpuLevelBuffer.c_str());
+    }
 
     std::string gpuLevelBuffer;
     {
@@ -596,17 +597,16 @@ void parseDebugConfig()
             gpuLevelStartPos += gpuLevelStartKeyLen;
             size_t gpuLevelEndPos = buffer.find("]", gpuLevelStartPos);
             gpuLevelBuffer = buffer.substr(gpuLevelStartPos, gpuLevelEndPos - gpuLevelStartPos);
-            size_t extraLenToErase = 0;
-            if ((gpuLevelEndPos + 1) < (buffer.length()))
-            {
-                if (buffer[gpuLevelEndPos + 1] == ',')
-                    extraLenToErase = 1;
-            }
-            buffer.erase(gpuLevelStartPos-gpuLevelStartKeyLen, gpuLevelBuffer.length() + gpuLevelStartKeyLen + 1 + extraLenToErase);
+            buffer.erase(gpuLevelStartPos-gpuLevelStartKeyLen, gpuLevelBuffer.length() + gpuLevelStartKeyLen + 1);
         }
     }
 
-    LOGD("gpuLevelBuffer: %s", gpuLevelBuffer.c_str());
+    if (gpuLevelBuffer.empty())
+    {
+        LOGD("gpuLevelBuffer: %s", gpuLevelBuffer.c_str());
+    }
+
+    LOGD("remain: %s", buffer.c_str());
 
     std::vector<std::string> keyValueArr;
     split(buffer, ",", &keyValueArr);
@@ -616,6 +616,8 @@ void parseDebugConfig()
         LOGE("Parse cc-res-level.json failed!");
         return;
     }
+
+    LOGD("element count: %d", (int)keyValueArr.size());
 
     std::map<std::string, std::string> configMap;
     for (size_t i = 0, len = keyValueArr.size(); i < len; ++i)
@@ -633,12 +635,8 @@ void parseDebugConfig()
         }
 
         deleteChar(keyValue[0], "\"");
+
         configMap.insert(std::make_pair(keyValue[0], keyValue[1]));
-    }
-    if (configMap.empty())
-    {
-        LOGD("config map is empty!");
-        return;
     }
 
     std::string tmp;
@@ -649,50 +647,112 @@ void parseDebugConfig()
         {
             _forceEnableOptimization = true;
         }
+        LOGD("[changed] force_enable_optimization: %d", _forceEnableOptimization);
     }
-    LOGD("force_enable_optimization: %d", _forceEnableOptimization);
-    
+    else
+    {
+        LOGD("[default] force_enable_optimization: %d", _forceEnableOptimization);
+    }
+
+
     if (getValueFromMap(configMap, "level_log_freq", &tmp))
     {
         _printCpuGpuLevelThreshold = (uint32_t)atoi(tmp.c_str());
+        LOGD("[changed] level_log_freq: %u", _printCpuGpuLevelThreshold);
     }
-    LOGD("level_log_freq: %u", _printCpuGpuLevelThreshold);
+    else
+    {
+        LOGD("[default] level_log_freq: %u", _printCpuGpuLevelThreshold);
+    }
+    
 
     if (getValueFromMap(configMap, "cpu_usage_log_freq", &tmp))
     {
         _printCpuUsageThreshold = (uint32_t)atoi(tmp.c_str());
+        LOGD("[changed] cpu_usage_log_freq: %u", _printCpuUsageThreshold);
     }
-    LOGD("cpu_usage_log_freq: %u", _printCpuUsageThreshold);
+    else
+    {
+        LOGD("[default] cpu_usage_log_freq: %u", _printCpuUsageThreshold);
+    }
 
     if (getValueFromMap(configMap, "level_decrease_threshold", &tmp))
     {
         _levelDecreaseThreshold = atof(tmp.c_str());
+        LOGD("[changed] level_decrease_threshold: %f", _levelDecreaseThreshold);
     }
-    LOGD("level_decrease_threshold: %f", _levelDecreaseThreshold);
+    else
+    {
+        LOGD("[default] level_decrease_threshold: %f", _levelDecreaseThreshold);
+    }
 
     if (getValueFromMap(configMap, "low_fps_check_mode", &tmp))
     {
         _lowFpsCheckMode = (uint32_t)atoi(tmp.c_str());
+        LOGD("[changed] low_fps_check_mode: %u", _lowFpsCheckMode);
     }
-    LOGD("low_fps_check_mode: %u", _lowFpsCheckMode);
+    else
+    {
+        LOGD("[default] low_fps_check_mode: %u", _lowFpsCheckMode);
+    }
 
     if (getValueFromMap(configMap, "low_realfps_threshold", &tmp))
     {
         _lowRealFpsThreshold = atof(tmp.c_str());
+        LOGD("[changed] low_realfps_threshold: %f", _lowRealFpsThreshold);
     }
-    LOGD("low_realfps_threshold: %f", _lowRealFpsThreshold);
+    else
+    {
+        LOGD("[default] low_realfps_threshold: %f", _lowRealFpsThreshold);
+    }
 
     if (getValueFromMap(configMap, "notify_level_by_low_fps_threshold", &tmp))
     {
         _notifyLevelByLowFpsThreshold = atof(tmp.c_str());
+        LOGD("[changed] notify_level_by_low_fps_threshold: %f", _notifyLevelByLowFpsThreshold);
     }
-    LOGD("notify_level_by_low_fps_threshold: %f", _notifyLevelByLowFpsThreshold);
+    else
+    {
+        LOGD("[default] notify_level_by_low_fps_threshold: %f", _notifyLevelByLowFpsThreshold);
+    }
+
+    if (getValueFromMap(configMap, "min_value_of_notify_cpu_level_by_low_fps", &tmp))
+    {
+        _minValueOfNotifyCpuLevelByLowFps = atoi(tmp.c_str());
+        if (_minValueOfNotifyCpuLevelByLowFps > CARRAY_SIZE(_cpuLevelArr))
+        {
+            _minValueOfNotifyCpuLevelByLowFps = CARRAY_SIZE(_cpuLevelArr);
+        }
+        LOGD("[changed] min_value_of_notify_cpu_level_by_low_fps: %d", _minValueOfNotifyCpuLevelByLowFps);
+    }
+    else
+    {
+        LOGD("[default] min_value_of_notify_cpu_level_by_low_fps: %d", _minValueOfNotifyCpuLevelByLowFps);
+    }
+
+    if (getValueFromMap(configMap, "min_value_of_notify_gpu_level_by_low_fps", &tmp))
+    {
+        _minValueOfNotifyGpuLevelByLowFps = atoi(tmp.c_str());
+        if (_minValueOfNotifyGpuLevelByLowFps > CARRAY_SIZE(_gpuLevelArr))
+        {
+            _minValueOfNotifyGpuLevelByLowFps = CARRAY_SIZE(_gpuLevelArr);
+        }
+        LOGD("[changed] min_value_of_notify_gpu_level_by_low_fps: %d", _minValueOfNotifyGpuLevelByLowFps);
+    }
+    else
+    {
+        LOGD("[default] min_value_of_notify_gpu_level_by_low_fps: %d", _minValueOfNotifyGpuLevelByLowFps);
+    }
 
     if (getValueFromMap(configMap, "continuous_low_realfps_threshold", &tmp))
     {
         _continuousLowRealFpsThreshold = (uint32_t)atoi(tmp.c_str());
+        LOGD("[changed] continuous_low_realfps_threshold: %u", _continuousLowRealFpsThreshold);
     }
-    LOGD("continuous_low_realfps_threshold: %u", _continuousLowRealFpsThreshold);
+    else
+    {
+        LOGD("[default] continuous_low_realfps_threshold: %u", _continuousLowRealFpsThreshold);
+    }
 
     if (getValueFromMap(configMap, "enable_collect_fps", &tmp))
     {
@@ -701,77 +761,170 @@ void parseDebugConfig()
         {
             _isCollectFpsEnabled = true;
         }
+        LOGD("[changed] enable_collect_fps: %d", (int)_isCollectFpsEnabled);
     }
-    LOGD("enable_collect_fps: %d", (int)_isCollectFpsEnabled);
+    else
+    {
+        LOGD("[default] enable_collect_fps: %d", (int)_isCollectFpsEnabled);
+    }
 
     if (getValueFromMap(configMap, "collect_fps_interval", &tmp))
     {
-        float collectFpsInterval = atof(tmp.c_str());
-        _fpsCollector.setCollectFpsInterval(collectFpsInterval);
+        _fpsCollector.setCollectFpsInterval(atof(tmp.c_str()));
+        LOGD("[changed] collect_fps_interval: %f", _fpsCollector.getCollectFpsInterval());
     }
-    LOGD("collect_fps_interval: %f", _fpsCollector.getCollectFpsInterval());
+    else
+    {
+        LOGD("[default] collect_fps_interval: %f", _fpsCollector.getCollectFpsInterval());
+    }
 
-    // if (getValueFromMap(configMap, "cpu_level", &tmp))
-    // {
-    //     const RapidJsonValue& cpu = document["cpu_level"];
-    //     assert(cpu.IsArray());
-    //     assert(_cpuLevelArr.size() == cpu.Size());
+    if (!cpuLevelBuffer.empty())
+    {
+        std::vector<std::string> cpuObjectArray;
+        split(cpuLevelBuffer, "},", &cpuObjectArray);
+        if (!cpuObjectArray.empty())
+        {
+            _cpuLevelArr.clear();
+            CpuLevelInfo cpuLevelInfo;
 
-    //     _cpuLevelArr.clear();
-    //     CpuLevelInfo cpuLevelInfo;
-    //     for (unsigned int i = 0; i < cpu.Size(); ++i)
-    //     {
-    //         assert(cpu[i].IsObject());
+            for (size_t i = 0, len = cpuObjectArray.size(); i < len; ++i)
+            {
+                std::string& e = cpuObjectArray[i];
+                size_t pos = e.find_first_of('{');
+                if (pos != std::string::npos)
+                {
+                    e.replace(pos, 1, "");
+                }
+                pos = e.find_last_of('}');
 
-    //         cpuLevelInfo.nodeCount = cpu[i]["node"].GetUint();
-    //         cpuLevelInfo.particleCount = cpu[i]["particle"].GetUint();
-    //         cpuLevelInfo.actionCount = cpu[i]["action"].GetUint();
-    //         cpuLevelInfo.audioCount = cpu[i]["audio"].GetUint();
-            
-    //         _cpuLevelArr.push_back(cpuLevelInfo);
-    //     }
-    // }
+                if (pos != std::string::npos)
+                {
+                    e.replace(pos, 1, "");
+                }
 
-    // if (getValueFromMap(configMap, "gpu_level", &tmp))
-    // {
-    //     const RapidJsonValue& gpu = document["gpu_level"];
-    //     assert(gpu.IsArray());
-    //     assert(_gpuLevelArr.size() == gpu.Size());
-        
-    //     _gpuLevelArr.clear();
-    //     GpuLevelInfo gpuLevelInfo;
-    //     for (unsigned int i = 0; i < gpu.Size(); ++i)
-    //     {
-    //         assert(gpu[i].IsObject());
-            
-    //         gpuLevelInfo.vertexCount = gpu[i]["vertex"].GetUint();
-    //         gpuLevelInfo.drawCount = gpu[i]["draw"].GetUint();
-            
-    //         _gpuLevelArr.push_back(gpuLevelInfo);
-    //     }
-    // }
+                LOGD("cpu level: %s", e.c_str());
 
-    // {
-    //     LOGD("-----------------------------------------");
-    //     std::vector<CpuLevelInfo>::iterator iter = _cpuLevelArr.begin();
-    //     for (; iter != _cpuLevelArr.end(); ++iter)
-    //     {
-    //         CpuLevelInfo level = *iter;
-    //         LOGD("cpu level: %u, %u, %u, %u", level.nodeCount, level.particleCount, level.actionCount, level.audioCount);
-    //     }
-    //     LOGD("-----------------------------------------");
-    // }
+                std::vector<std::string> cpuLevelElement;
+                split(e, ",", &cpuLevelElement);
 
-    // {
-    //     LOGD("=========================================");
-    //     std::vector<GpuLevelInfo>::iterator iter = _gpuLevelArr.begin();
-    //     for (; iter != _gpuLevelArr.end(); ++iter)
-    //     {
-    //         GpuLevelInfo level = *iter;
-    //         LOGD("gpu level: %u, %u", level.vertexCount, level.drawCount);
-    //     }
-    //     LOGD("=========================================");
-    // }
+                for (size_t j = 0; j < cpuLevelElement.size(); ++j)
+                {
+                    std::map<std::string, std::string> kvMap;
+                    std::vector<std::string> kvArr;
+                    split(cpuLevelElement[j], ":", &kvArr);
+                    if (kvArr.size() != 2)
+                    {
+                        LOGE("cpu level configuration error: %d", (int)kvArr.size());
+                        return;
+                    }
+                    deleteChar(kvArr[0], "\"");
+
+                    kvMap.insert(std::make_pair(kvArr[0], kvArr[1]));
+
+                    if (getValueFromMap(kvMap, "node", &tmp))
+                    {
+                        cpuLevelInfo.nodeCount = (uint32_t)atoi(tmp.c_str());
+                    }
+
+                    if (getValueFromMap(kvMap, "particle", &tmp))
+                    {
+                        cpuLevelInfo.particleCount = (uint32_t)atoi(tmp.c_str());
+                    }
+                    if (getValueFromMap(kvMap, "action", &tmp))
+                    {
+                        cpuLevelInfo.actionCount = (uint32_t)atoi(tmp.c_str());
+                    }
+                    if (getValueFromMap(kvMap, "audio", &tmp))
+                    {
+                        cpuLevelInfo.audioCount = (uint32_t)atoi(tmp.c_str());
+                    }
+                }
+
+                _cpuLevelArr.push_back(cpuLevelInfo);
+            }
+        }
+    }
+
+    if (!gpuLevelBuffer.empty())
+    {
+        std::vector<std::string> gpuObjectArray;
+        split(gpuLevelBuffer, "},", &gpuObjectArray);
+        if (!gpuObjectArray.empty())
+        {
+            _gpuLevelArr.clear();
+            GpuLevelInfo gpuLevelInfo;
+
+            for (size_t i = 0, len = gpuObjectArray.size(); i < len; ++i)
+            {
+                std::string& e = gpuObjectArray[i];
+                size_t pos = e.find_first_of('{');
+                if (pos != std::string::npos)
+                {
+                    e.replace(pos, 1, "");
+                }
+                pos = e.find_last_of('}');
+
+                if (pos != std::string::npos)
+                {
+                    e.replace(pos, 1, "");
+                }
+
+                LOGD("gpu level: %s", e.c_str());
+
+                std::vector<std::string> gpuLevelElement;
+                split(e, ",", &gpuLevelElement);
+
+                for (size_t j = 0; j < gpuLevelElement.size(); ++j)
+                {
+                    std::map<std::string, std::string> kvMap;
+                    std::vector<std::string> kvArr;
+                    split(gpuLevelElement[j], ":", &kvArr);
+                    if (kvArr.size() != 2)
+                    {
+                        LOGE("gpu level configuration error: %d", (int)kvArr.size());
+                        return;
+                    }
+                    deleteChar(kvArr[0], "\"");
+
+                    kvMap.insert(std::make_pair(kvArr[0], kvArr[1]));
+
+                    if (getValueFromMap(kvMap, "vertex", &tmp))
+                    {
+                        gpuLevelInfo.vertexCount = (uint32_t)atoi(tmp.c_str());
+                    }
+
+                    if (getValueFromMap(kvMap, "draw", &tmp))
+                    {
+                        gpuLevelInfo.drawCount = (uint32_t)atoi(tmp.c_str());
+                    }
+                }
+                
+                _gpuLevelArr.push_back(gpuLevelInfo);
+            }
+        }
+    }
+
+     {
+         LOGD("-----------------------------------------");
+         std::vector<CpuLevelInfo>::iterator iter = _cpuLevelArr.begin();
+         for (; iter != _cpuLevelArr.end(); ++iter)
+         {
+             CpuLevelInfo level = *iter;
+             LOGD("cpu level: %u, %u, %u, %u", level.nodeCount, level.particleCount, level.actionCount, level.audioCount);
+         }
+         LOGD("-----------------------------------------");
+     }
+
+     {
+         LOGD("=========================================");
+         std::vector<GpuLevelInfo>::iterator iter = _gpuLevelArr.begin();
+         for (; iter != _gpuLevelArr.end(); ++iter)
+         {
+             GpuLevelInfo level = *iter;
+             LOGD("gpu level: %u, %u", level.vertexCount, level.drawCount);
+         }
+         LOGD("=========================================");
+     }
 #endif // EDM_DEBUG
 }
 
@@ -862,7 +1015,7 @@ void EngineDataManager::calculateFrameLost()
                 // notify continuous frame lost event to system
                 notifyContinuousFrameLost(_continuousFrameLostCycle, _continuousFrameLostThreshold, _continuousFrameLostCount);
 
-                LOGD("continuous frame lost: %d", _continuousFrameLostCount);
+                // LOGD("continuous frame lost: %d", _continuousFrameLostCount);
                 _continuousFrameLostCount = 0;
             }
         }
@@ -875,7 +1028,7 @@ void EngineDataManager::calculateFrameLost()
             {
                 // notify low fps event to system
                 notifyLowFps(_lowFpsCycle, _lowFpsThreshold, _lowFpsCounter);
-                LOGD("low fps frame count: %d", _lowFpsCounter);
+                // LOGD("low fps frame count: %d", _lowFpsCounter);
                 _lowFpsCounter = 0;
             }
         }
@@ -1110,27 +1263,44 @@ void EngineDataManager::notifyGameStatusIfCpuOrGpuLevelChanged()
             || newCpuLevelMulFactor != _oldCpuLevelMulFactor
             || newGpuLevelMulFactor != _oldGpuLevelMulFactor)
         {
+            const char* logPrefix = "[level changed]";
+            if (isLowRealFps)
+            {
+                logPrefix = "[low fps]";
+                if (newCpuLevelMulFactor < _minValueOfNotifyCpuLevelByLowFps)
+                {
+                    newCpuLevelMulFactor = _minValueOfNotifyCpuLevelByLowFps;
+                }
+
+                if (newGpuLevelMulFactor < _minValueOfNotifyGpuLevelByLowFps)
+                {
+                    newGpuLevelMulFactor = _minValueOfNotifyGpuLevelByLowFps;
+                }
+            }
+
             int cpuLevelToNotify = newCpuLevelMulFactor;
             int gpuLevelToNotify = newGpuLevelMulFactor;
 
             // Set CPU or GPU level to -2 only when fps isn't changed and isn't in low fps.
             if (!_isFpsChanged && !isLowRealFps)
             {
-                if (levelChangeReason == LEVEL_CHANGE_REASON_CPU)
+                if (_oldGpuLevelMulFactor == newGpuLevelMulFactor)
                 {
                     gpuLevelToNotify = -2; // Only CPU level has been changed, pass -2 to GPU level.
                 }
-                else if (levelChangeReason == LEVEL_CHANGE_REASON_GPU)
+                else if (_oldCpuLevelMulFactor == newCpuLevelMulFactor)
                 {
                     cpuLevelToNotify = -2; // Only GPU level has been changed, pass -2 to CPU level.
                 }
             }
 
-            LOGD("notifyGameStatus: IN_SCENE(%d, %d), cpuLevel: %d->%d, gpuLevel: %d->%d, factor: %f",
+            LOGD("%s notifyGameStatus: IN_SCENE(%d, %d), cpuLevel: %d->%d(%d), gpuLevel: %d->%d(%d), factor: %f",
+                logPrefix,
                 cpuLevel, gpuLevel,
-                _oldCpuLevelMulFactor, cpuLevelToNotify,
-                _oldGpuLevelMulFactor, gpuLevelToNotify,
+                _oldCpuLevelMulFactor, cpuLevelToNotify, newCpuLevelMulFactor,
+                _oldGpuLevelMulFactor, gpuLevelToNotify, newGpuLevelMulFactor,
                 _cpuFpsFactor);
+
             notifyGameStatus(IN_SCENE, cpuLevelToNotify, gpuLevelToNotify);
 
             _oldCpuLevelMulFactor = newCpuLevelMulFactor;
