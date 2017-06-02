@@ -39,7 +39,7 @@ THE SOFTWARE.
 #define LOGD(...)  __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
 #define LOGE(...)  __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
-#define EDM_DEBUG 1
+#define EDM_DEBUG 0
 
 #if EDM_DEBUG
 #include "ProcessCpuTracker.h"
