@@ -127,6 +127,7 @@ const char* CLASS_NAME_RENDERER = "org/cocos2dx/lib/Cocos2dxRenderer";
 
 bool _isInitialized = false;
 bool _isSupported = false;
+bool _isEnabled = true;
 bool _isFirstSetNextScene = true;
 bool _isReplaceScene = false;
 bool _isReadFile = false;
@@ -930,6 +931,7 @@ void parseDebugConfig()
 
 void setAnimationIntervalBySystem(float interval)
 {
+    // Don't need to check _isEnabled since before invoking this function, _isEnabled is checked.
     if (!_isSupported)
         return;
 
@@ -940,6 +942,7 @@ void setAnimationIntervalBySystem(float interval)
 
 void setAnimationIntervalBySceneChange(float interval)
 {
+    // Don't need to check _isEnabled since before invoking this function, _isEnabled is checked.
     if (!_isSupported)
         return;
 
@@ -951,6 +954,19 @@ void setAnimationIntervalBySceneChange(float interval)
 } // namespace {
 
 namespace cocos2d {
+
+// static
+void EngineDataManager::reset()
+{
+    // Reset the expected fps and special effect level.
+    setAnimationIntervalBySystem(-1.0f);
+    CCParticleSystem::setTotalParticleCountFactor(1.0f);
+
+    CCDirector* director = CCDirector::sharedDirector();
+    director->setBeforeSetNextSceneHook(NULL);
+    director->setAfterDrawHook(NULL);
+    CCFileUtils::sharedFileUtils()->setBeforeReadFileHook(NULL);
+}
 
 int EngineDataManager::getTotalParticleCount()
 {
@@ -1055,6 +1071,9 @@ void EngineDataManager::onBeforeSetNextScene()
     {
         notifyGameStatus(SCENE_CHANGE_END, -1, -1);
     }
+
+    if (!_isEnabled)
+        return;
 
     notifyGameStatus(SCENE_CHANGE_BEGIN, 5, 0);
 
@@ -1337,6 +1356,12 @@ void EngineDataManager::onAfterDrawScene()
             _oldCpuLevelMulFactor = -1;
             _oldGpuLevelMulFactor = -1;
             notifyGameStatus(SCENE_CHANGE_END, -1, -1);
+
+            if (!_isEnabled)
+            {
+                LOGD("%s, reset after scene change!", __FUNCTION__);
+                reset();
+            }
         }
         else if (_isReadFile)
         {
@@ -1346,7 +1371,15 @@ void EngineDataManager::onAfterDrawScene()
     }
     else
     {
-        notifyGameStatusIfCpuOrGpuLevelChanged();
+        if (_isEnabled)
+        {
+            notifyGameStatusIfCpuOrGpuLevelChanged();
+        }
+        else
+        {
+            LOGD("%s, reset when no scene change is found!", __FUNCTION__);
+            reset();
+        }
     }
 
 #if EDM_DEBUG
@@ -1409,7 +1442,7 @@ void EngineDataManager::init()
     }
 #endif
 
-    if (!_isSupported)
+    if (!_isSupported || !_isEnabled)
         return;
 
     if (_isInitialized)
@@ -1434,14 +1467,46 @@ void EngineDataManager::init()
 // static 
 void EngineDataManager::destroy()
 {
-    if (!_isSupported)
+    if (!_isSupported || !_isEnabled)
         return;
+}
+
+// static
+void EngineDataManager::disable()
+{
+    if (!_isEnabled)
+        return;
+
+    LOGD("EngineDataManager::disable");
+
+    _isEnabled = false;
+
+    // Reset hook functions to NULL when it isn't in replace scene.
+    // If it's in replacing scene, reset hook functions after
+    // replacing scene is finished.
+    if (!_isReplaceScene)
+    {
+        LOGD("disable, Isn't in replacing scene, reset hook functions to NULL!");
+        reset();        
+    }
+    else
+    {
+        LOGD("disable, it's in replacing scene, wait it to be finished!");
+    }
+
+    // Notify java code to throw any message from HuaWei SDK.
+    JniMethodInfo methodInfo;
+    if (JniHelper::getStaticMethodInfo(methodInfo, CLASS_NAME_ENGINE_DATA_MANAGER, "disable", "()V"))
+    {
+        methodInfo.env->CallStaticVoidMethod(methodInfo.classID, methodInfo.methodID);
+        methodInfo.env->DeleteLocalRef(methodInfo.classID);
+    }
 }
 
 // static
 void EngineDataManager::notifyGameStatus(GameStatus type, int cpuLevel, int gpuLevel)
 {
-    if (!_isSupported)
+    if (!_isSupported || !_isEnabled)
         return;
 
     JniMethodInfo methodInfo;
@@ -1471,9 +1536,9 @@ void EngineDataManager::setAnimationInterval(float interval, SetIntervalReason r
     float newFps = 0.0f;
 
     if (reason == SET_INTERVAL_REASON_BY_GAME) {
-        LOGD("setAnimationInterval by game: %.04f", interval);
+        LOGD("setAnimationInterval by game: %f", interval);
 
-        if (_isSupported)
+        if (_isSupported && _isEnabled)
         {
             float oldInterval = _animationIntervalBySystem > 0.0f ? _animationIntervalBySystem : _animationIntervalByEngineOrGame;
             oldFps = (float)ceil(1.0f/oldInterval);
@@ -1485,28 +1550,28 @@ void EngineDataManager::setAnimationInterval(float interval, SetIntervalReason r
         _animationIntervalBySystem = -1.0f;
         _animationIntervalByEngineOrGame = interval;
     } else if (reason == SET_INTERVAL_REASON_BY_ENGINE) {
-        LOGD("setAnimationInterval by engine: %.04f", interval);
+        LOGD("setAnimationInterval by engine: %f", interval);
         _animationIntervalByDirectorPaused = -1.0f;
         _animationIntervalByEngineOrGame = interval;
     } else if (reason == SET_INTERVAL_REASON_BY_SYSTEM) {
-        LOGD("setAnimationInterval by system: %.04f", interval);
+        LOGD("setAnimationInterval by system: %f", interval);
         if (interval > 0.0f) {
             _animationIntervalBySystem = interval;
         } else {
             _animationIntervalBySystem = -1.0f;
         }
     } else if (reason == SET_INTERVAL_REASON_BY_SCENE_CHANGE) {
-        LOGD("setAnimationInterval by scene change: %.04f", interval);
+        LOGD("setAnimationInterval by scene change: %f", interval);
         if (interval > 0.0f) {
             _animationIntervalBySceneChange = interval;
         } else {
             _animationIntervalBySceneChange = -1.0f;
         }
     } else if (reason == SET_INTERVAL_REASON_BY_DIRECTOR_PAUSE) {
-        LOGD("setAnimationInterval by director paused: %.04f", interval);
+        LOGD("setAnimationInterval by director paused: %f", interval);
         _animationIntervalByDirectorPaused = interval;
     } else {
-        LOGD("setAnimationInterval by UNKNOWN reason: %.04f", interval);
+        LOGD("setAnimationInterval by UNKNOWN reason: %f", interval);
     }
     updateFinalAnimationInterval();
 
@@ -1524,7 +1589,7 @@ void EngineDataManager::setAnimationInterval(float interval, SetIntervalReason r
         methodInfo.env->DeleteLocalRef(methodInfo.classID);
     }
 
-    if (_isSupported)
+    if (_isSupported && _isEnabled)
     {
         // Notify system that FPS configuration has been changed by game.
         // notifyFpsChanged has to be invoked at the end.
@@ -1540,7 +1605,7 @@ void EngineDataManager::setAnimationInterval(float interval, SetIntervalReason r
 // static
 void EngineDataManager::notifyContinuousFrameLost(int continueFrameLostCycle, int continueFrameLostThreshold, int times)
 {
-    if (!_isSupported)
+    if (!_isSupported || !_isEnabled)
         return;
 
     JniMethodInfo methodInfo;
@@ -1554,7 +1619,7 @@ void EngineDataManager::notifyContinuousFrameLost(int continueFrameLostCycle, in
 // static
 void EngineDataManager::notifyLowFps(int lowFpsCycle, float lowFpsThreshold, int frames)
 {
-    if (!_isSupported)
+    if (!_isSupported || !_isEnabled)
         return;
 
     JniMethodInfo methodInfo;
@@ -1568,7 +1633,7 @@ void EngineDataManager::notifyLowFps(int lowFpsCycle, float lowFpsThreshold, int
 // static
 void EngineDataManager::notifyFpsChanged(float oldFps, float newFps)
 {
-    if (!_isSupported)
+    if (!_isSupported || !_isEnabled)
         return;
 
     LOGD("notifyFpsChanged: %.0f -> %.0f", oldFps, newFps);
@@ -1583,7 +1648,7 @@ void EngineDataManager::notifyFpsChanged(float oldFps, float newFps)
 
 void EngineDataManager::nativeOnQueryFps(JNIEnv* env, jobject thiz, jintArray arrExpectedFps, jintArray arrRealFps)
 {
-    if (!_isSupported)
+    if (!_isSupported || !_isEnabled)
         return;
 
     jsize arrLenExpectedFps = env->GetArrayLength(arrExpectedFps);
@@ -1613,7 +1678,7 @@ void EngineDataManager::nativeOnQueryFps(JNIEnv* env, jobject thiz, jintArray ar
 
 void EngineDataManager::nativeOnChangeContinuousFrameLostConfig(JNIEnv* env, jobject thiz, jint continueFrameLostCycle, jint continueFrameLostThreshold)
 {
-    if (!_isSupported)
+    if (!_isSupported || !_isEnabled)
         return;
 
     LOGD("nativeOnChangeContinuousFrameLostConfig, continueFrameLostCycle: %d, continueFrameLostThreshold: %d", continueFrameLostCycle, continueFrameLostThreshold);
@@ -1624,7 +1689,7 @@ void EngineDataManager::nativeOnChangeContinuousFrameLostConfig(JNIEnv* env, job
 
 void EngineDataManager::nativeOnChangeLowFpsConfig(JNIEnv* env, jobject thiz, jint lowFpsCycle, jfloat lowFpsThreshold)
 {
-    if (!_isSupported)
+    if (!_isSupported || !_isEnabled)
         return;
 
     LOGD("nativeOnChangeLowFpsConfig, lowFpsCycle: %d, lowFpsThreshold: %f", lowFpsCycle, lowFpsThreshold);
@@ -1634,7 +1699,7 @@ void EngineDataManager::nativeOnChangeLowFpsConfig(JNIEnv* env, jobject thiz, ji
 
 void EngineDataManager::nativeOnChangeExpectedFps(JNIEnv* env, jobject thiz, jint fps)
 {
-    if (!_isSupported)
+    if (!_isSupported || !_isEnabled)
         return;
 
     if (fps < -1 || fps > 60)
@@ -1670,7 +1735,7 @@ void EngineDataManager::nativeOnChangeExpectedFps(JNIEnv* env, jobject thiz, jin
 
 void EngineDataManager::nativeOnChangeSpecialEffectLevel(JNIEnv* env, jobject thiz, jint level)
 {
-    if (!_isSupported)
+    if (!_isSupported || !_isEnabled)
         return;
 
     LOGD("nativeOnChangeSpecialEffectLevel, set level: %d", level);
@@ -1686,7 +1751,7 @@ void EngineDataManager::nativeOnChangeSpecialEffectLevel(JNIEnv* env, jobject th
 
 void EngineDataManager::nativeOnChangeMuteEnabled(JNIEnv* env, jobject thiz, jboolean isMuteEnabled)
 {
-    if (!_isSupported)
+    if (!_isSupported || !_isEnabled)
         return;
 
     LOGD("nativeOnChangeMuteEnabled, isMuteEnabled: %d", isMuteEnabled);
@@ -1697,6 +1762,12 @@ void EngineDataManager::nativeOnChangeMuteEnabled(JNIEnv* env, jobject thiz, jbo
 
 /////////////////////////////
 extern "C" {
+
+JNIEXPORT void JNICALL JNI_FUNC_PREFIX(nativeDisable)(JNIEnv* env, jobject thiz)
+{
+    LOGD("nativeDisable ...");
+    _isEnabled = false;
+}
 
 JNIEXPORT void JNICALL JNI_FUNC_PREFIX(nativeSetSupportOptimization)(JNIEnv* env, jobject thiz, jboolean isSupported)
 {

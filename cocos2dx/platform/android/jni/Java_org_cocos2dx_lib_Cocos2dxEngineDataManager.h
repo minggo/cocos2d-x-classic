@@ -40,6 +40,7 @@ class EngineDataManager
 public:
     static void init();
     static void destroy();
+    static void disable();
     
     static std::string getVendorInfo();
 
@@ -59,6 +60,7 @@ public:
     static void onEnterBackground();
     
 private:
+    static void reset();
     static void notifyContinuousFrameLost(int frameLostCycle, int continueFrameLostThreshold, int times);
     static void notifyLowFps(int lowFpsCycle, float lowFpsThreshold, int frames);
     static void notifyFpsChanged(float oldFps, float newFps);

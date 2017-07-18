@@ -1306,6 +1306,12 @@ void CCNode::removeAllComponents()
     m_pComponentContainer->removeAll();
 }
 
+// static
+int CCNode::getAttachedNodeCount()
+{
+    return s_attachedNodeCount;
+}
+
 // CCNodeRGBA
 CCNodeRGBA::CCNodeRGBA()
 : _displayedOpacity(255)
