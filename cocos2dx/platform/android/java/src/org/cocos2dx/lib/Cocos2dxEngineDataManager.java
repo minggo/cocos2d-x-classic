@@ -26,7 +26,6 @@ package org.cocos2dx.lib;
 
 import android.content.Context;
 import android.opengl.GLSurfaceView;
-import android.os.Handler;
 import android.util.Log;
 
 import org.cocos2dx.enginedata.EngineDataManager;
@@ -58,6 +57,10 @@ public class Cocos2dxEngineDataManager {
      */
     // Currently, it only supports HuaWei mobile phones.
     public static void disable() {
+    	if (!sIsEnabled)
+    		return;
+
+    	Log.d(TAG, "disable, Cocos2dxEngineManager was disabled!");
         sIsEnabled = false;
     }
 
@@ -81,6 +84,7 @@ public class Cocos2dxEngineDataManager {
 
             @Override
             public void onQueryFps(final int[] expectedFps, final int[] realFps) {
+            	if (sIsEnabled && sIsInited) {
                 //@note Query FPS should not post it to GL thread since `expectedFps` and `realFps`
                 //      need to be filled immediately.
 //                glSurfaceView.queueEvent(new Runnable() {
@@ -89,56 +93,76 @@ public class Cocos2dxEngineDataManager {
                         nativeOnQueryFps(expectedFps, realFps);
 //                    }
 //                });
+            	}
+            	else {
+            		if (expectedFps != null && expectedFps.length > 0) {
+            			expectedFps[0] = -1;
+            		}
+            		
+            		if (realFps != null && realFps.length > 0) {
+            			realFps[0] = -1;
+            		}
+            	}
             }
 
             @Override
             public void onChangeContinuousFrameLostConfig(final int cycle, final int maxFrameMissed) {
-                glSurfaceView.queueEvent(new Runnable() {
-                    @Override
-                    public void run() {
-                        nativeOnChangeContinuousFrameLostConfig(cycle, maxFrameMissed);
-                    }
-                });
+            	if (sIsEnabled && sIsInited) {
+	                glSurfaceView.queueEvent(new Runnable() {
+	                    @Override
+	                    public void run() {
+	                        nativeOnChangeContinuousFrameLostConfig(cycle, maxFrameMissed);
+	                    }
+	                });
+            	}
             }
 
             @Override
             public void onChangeLowFpsConfig(final int cycle, final float maxFrameDx) {
-                glSurfaceView.queueEvent(new Runnable() {
-                    @Override
-                    public void run() {
-                        nativeOnChangeLowFpsConfig(cycle, maxFrameDx);
-                    }
-                });
+            	if (sIsEnabled && sIsInited) {
+	                glSurfaceView.queueEvent(new Runnable() {
+	                    @Override
+	                    public void run() {
+	                        nativeOnChangeLowFpsConfig(cycle, maxFrameDx);
+	                    }
+	                });
+            	}
             }
 
             @Override
             public void onChangeExpectedFps(final int fps) {
-                glSurfaceView.queueEvent(new Runnable() {
-                    @Override
-                    public void run() {
-                        nativeOnChangeExpectedFps(fps);
-                    }
-                });
+            	if (sIsEnabled && sIsInited) {
+	                glSurfaceView.queueEvent(new Runnable() {
+	                    @Override
+	                    public void run() {
+	                        nativeOnChangeExpectedFps(fps);
+	                    }
+	                });
+            	}
             }
 
             @Override
             public void onChangeSpecialEffectLevel(final int level) {
-                glSurfaceView.queueEvent(new Runnable() {
-                    @Override
-                    public void run() {
-                        nativeOnChangeSpecialEffectLevel(level);
-                    }
-                });
+            	if (sIsEnabled && sIsInited) {
+	                glSurfaceView.queueEvent(new Runnable() {
+	                    @Override
+	                    public void run() {
+	                        nativeOnChangeSpecialEffectLevel(level);
+	                    }
+	                });
+            	}
             }
 
             @Override
             public void onChangeMuteEnabled(final boolean enabled) {
-                glSurfaceView.queueEvent(new Runnable() {
-                    @Override
-                    public void run() {
-                        nativeOnChangeMuteEnabled(enabled);
-                    }
-                });
+            	if (sIsEnabled && sIsInited) {
+	                glSurfaceView.queueEvent(new Runnable() {
+	                    @Override
+	                    public void run() {
+	                        nativeOnChangeMuteEnabled(enabled);
+	                    }
+	                });
+            	}
             }
         };
 
@@ -195,7 +219,7 @@ public class Cocos2dxEngineDataManager {
      */
     public static void notifyGameStatus(int gameStatus, int cpuLevel, int gpuLevel) {
         if (!sIsEnabled) {
-            nativeSetSupportOptimization(false);
+        	nativeDisable();
             return;
         }
 
@@ -217,7 +241,7 @@ public class Cocos2dxEngineDataManager {
      */
     public static void notifyContinuousFrameLost(int cycle, int continuousFrameLostThreshold, int times) {
         if (!sIsEnabled) {
-            nativeSetSupportOptimization(false);
+        	nativeDisable();
             return;
         }
 
@@ -234,7 +258,7 @@ public class Cocos2dxEngineDataManager {
      */
     public static void notifyLowFps(int cycle, float lowFpsThreshold, int lostFrameCount) {
         if (!sIsEnabled) {
-            nativeSetSupportOptimization(false);
+        	nativeDisable();
             return;
         }
 
@@ -243,7 +267,7 @@ public class Cocos2dxEngineDataManager {
 
     public static void notifyFpsChanged(float oldFps, float newFps) {
         if (!sIsEnabled) {
-            nativeSetSupportOptimization(false);
+        	nativeDisable();
             return;
         }
 
@@ -251,6 +275,7 @@ public class Cocos2dxEngineDataManager {
     }
 
     // Native methods
+    private native static void nativeDisable();
     private native static void nativeSetSupportOptimization(boolean isSupported);
     private native static void nativeOnQueryFps(/*out*/ int[] expectedFps, /*out*/ int[] realFps);
     private native static void nativeOnChangeContinuousFrameLostConfig(int cycle, int continuousFrameLostThreshold);
