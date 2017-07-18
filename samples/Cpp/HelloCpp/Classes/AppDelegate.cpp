@@ -6,6 +6,9 @@
 #include "HelloWorldScene.h"
 #include "LoadingScene.h"
 #include "AppMacros.h"
+#if CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID
+#include "platform/android/jni/Java_org_cocos2dx_lib_Cocos2dxEngineDataManager.h"
+#endif
 
 USING_NS_CC;
 using namespace std;
@@ -17,6 +20,31 @@ AppDelegate::AppDelegate() {
 AppDelegate::~AppDelegate() 
 {
 }
+
+class MyTouchDelegate : public CCObject, public CCTouchDelegate
+{
+public:
+
+    MyTouchDelegate() {}
+
+    virtual ~MyTouchDelegate()
+    {
+    }
+
+    virtual void ccTouchesEnded(CCSet *pTouches, CCEvent *pEvent)
+    {
+        CCTouch *touch = (CCTouch*)pTouches->anyObject();
+        CCPoint location = touch->getLocation();
+
+        if (location.x > 200 && location.x < 280 && location.y < 100)
+        {
+            CCLog("ccTouchesEnded, EngineDataManager::disable()");
+#if CC_TARGET_PLATFORM == CC_PLATFORM_ANDROID
+            EngineDataManager::disable();
+#endif
+        }
+    }
+ };
 
 bool AppDelegate::applicationDidFinishLaunching() {
     // initialize director
@@ -75,6 +103,11 @@ bool AppDelegate::applicationDidFinishLaunching() {
 
     // run
     pDirector->runWithScene(pScene);
+
+    CCTouchDispatcher* dispatcher = pDirector->getTouchDispatcher();
+    MyTouchDelegate* delegate = new MyTouchDelegate();
+    dispatcher->addStandardDelegate(delegate, 0);
+    delegate->release();
 
     return true;
 }
